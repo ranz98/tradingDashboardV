@@ -345,6 +345,18 @@ def parse_signal(text: str) -> dict:
     t    = text.strip()
     errs = []
 
+    # ── 0. KEYWORD FILTERING ────────────────────────────────────────────────
+    good_kws = ["Entry Point", "Recommend", "total"]
+    bad_kws  = ["HIT", "LOSS", "passed"]
+
+    has_good = any(kw.lower() in t.lower() for kw in good_kws)
+    has_bad  = any(kw.lower() in t.lower() for kw in bad_kws)
+
+    if not has_good:
+        errs.append(f"❌ Missing signal keywords ({', '.join(good_kws)}) — ignoring")
+    if has_bad:
+        errs.append(f"❌ Contains ignore keywords (HIT, LOSS, passed) — skipping")
+
     # ── 1. SIDE ──────────────────────────────────────────────────────────────
     side = None
     # Check for explicit LONG/BUY or SHORT/SELL indicators
