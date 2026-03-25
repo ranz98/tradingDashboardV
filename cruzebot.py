@@ -854,8 +854,9 @@ def collect_stats() -> dict:
         streak = {"type":st,"count":cnt}
 
     return {
-        "pushedAt": utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "counters": get_counters(),
+        "pushedAt":       utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "lastHeartbeat":   int(time.time() * 1000),
+        "counters":       get_counters(),
         "account": {
             "walletBalance":    round(float(acct.get("totalWalletBalance",    0)),2),
             "availableBalance": round(float(acct.get("availableBalance",      0)),2),
