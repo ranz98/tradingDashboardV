@@ -785,6 +785,32 @@ def collect_stats() -> dict:
                           {"incomeType": "REALIZED_PNL",
                            "startTime": ms_ago(INCOME_DAYS), "limit": 1000}, weight=20)
 
+    # ── 4. Fetch Live SL/TP from Binance Open Orders ────────────────────────
+    try:
+        open_std = binance_get("/fapi/v1/openOrders", weight=5)
+        # Some symbols use Algo Orders for SL/TP
+        open_algo_raw = binance_get("/fapi/v1/algoOrder/openAlgoOrders", weight=5)
+        # Check if response is wrapped in an object or just a list
+        open_algo = open_algo_raw.get("orders", open_algo_raw) if isinstance(open_algo_raw, dict) else open_algo_raw
+    except Exception as e:
+        push_log.warning("Could not fetch live orders: %s", e)
+        open_std = []; open_algo = []
+
+    live_stops = {}
+    for o in (open_std if isinstance(open_std, list) else []):
+        s = o["symbol"]
+        if s not in live_stops: live_stops[s] = {"sl": None, "tp": None}
+        ot = o.get("type", "")
+        if ot == "STOP_MARKET": live_stops[s]["sl"] = float(o.get("stopPrice", 0))
+        elif ot == "TAKE_PROFIT_MARKET": live_stops[s]["tp"] = float(o.get("stopPrice", 0))
+
+    for o in (open_algo if isinstance(open_algo, list) else []):
+        s = o["symbol"]
+        if s not in live_stops: live_stops[s] = {"sl": None, "tp": None}
+        at = o.get("type", "")
+        if at == "STOP_MARKET": live_stops[s]["sl"] = float(o.get("triggerPrice", 0))
+        elif at == "TAKE_PROFIT_MARKET": live_stops[s]["tp"] = float(o.get("triggerPrice", 0))
+
     positions = []
     for p in (raw_pos if isinstance(raw_pos, list) else []):
         amt = float(p.get("positionAmt", 0))
@@ -793,13 +819,19 @@ def collect_stats() -> dict:
         upnl  = float(p.get("unRealizedProfit", 0)); liq = float(p.get("liquidationPrice", 0))
         lev   = int(p.get("leverage",1))
         pct   = (((mark-entry)/entry*100*(1 if amt>0 else -1)) * lev) if entry else 0
-        tgt   = _active_targets.get(p["symbol"], {})
+        
+        # Use live data from exchange if available, otherwise fall back to local target state
+        ls = live_stops.get(p["symbol"], {})
+        tgt = _active_targets.get(p["symbol"], {})
+        final_sl = ls.get("sl") or tgt.get("sl")
+        final_tp = ls.get("tp") or tgt.get("tp")
+
         positions.append({"symbol": p["symbol"], "side": "LONG" if amt>0 else "SHORT",
             "size": abs(amt), "entryPrice": round(entry,6), "markPrice": round(mark,6),
             "liqPrice": round(liq,6) if liq else None,
             "unrealizedPnl": round(upnl,4), "changePct": round(pct,3),
             "leverage": lev,
-            "sl": tgt.get("sl"), "tp": tgt.get("tp")})
+            "sl": final_sl, "tp": final_tp})
 
     trades = [{"ts": i["time"],
                "time": datetime.utcfromtimestamp(i["time"]/1000).strftime("%Y-%m-%d %H:%M"),
