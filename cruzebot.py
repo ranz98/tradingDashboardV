@@ -694,8 +694,10 @@ async def run_telegram_bot() -> None:
         add_event_log(f"Signal detected: {sig['symbol']} {sig['side']}")
         inc_signals_rcvd()  # count every parseable signal
 
-        # ── Send rich structured notification (includes verification + errors) ──
-        notify_signal(sig)
+        # ── Only notify Telegram if it's NOT noise (less than 3 issues) ──────
+        is_noise = any("Message ignored" in str(e) for e in sig["errors"])
+        if not is_noise:
+            notify_signal(sig)
 
         # ── Log any warnings locally as well ─────────────────────────────────
         if sig["errors"]:
