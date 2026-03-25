@@ -13,7 +13,7 @@ Usage:
   python cruzebot.py
 """
 
-import os, time, hmac, hashlib, requests, re, json, asyncio, logging, threading, functions
+import os, time, hmac, hashlib, requests, re, json, asyncio, logging, threading, functions, math
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -569,18 +569,25 @@ def get_price(symbol: str) -> float | None:
         return None
 
 
+def get_precision_data(symbol: str) -> tuple[int, int]:
+    """Returns (pricePrecision, quantityPrecision) for a symbol."""
+    try:
+        info = requests.get(f"{BINANCE_URL}/fapi/v1/exchangeInfo", timeout=8).json()
+        for s in info.get("symbols", []):
+            if s["symbol"] == symbol:
+                tick_size = float(next(f['tickSize'] for f in s['filters'] if f['filterType'] == 'PRICE_FILTER'))
+                price_prec = max(0, -int(round(math.log10(tick_size))))
+                qty_prec = int(s["quantityPrecision"])
+                return price_prec, qty_prec
+    except: pass
+    return 8, 3 # Default fallback
+
 def get_qty(symbol: str, usdt_amount: float = USDT_AMOUNT, lev: int = LEVERAGE) -> float:
     price = get_price(symbol)
-    if not price:
-        return 0
+    if not price: return 0
     try:
-        info = requests.get(f"{BINANCE_URL}/fapi/v1/exchangeInfo", timeout=5).json()
-        precision = 1
-        for s in info["symbols"]:
-            if s["symbol"] == symbol:
-                precision = int(s["quantityPrecision"])
-                break
-        return round(usdt_amount / price, precision)
+        _, qty_prec = get_precision_data(symbol)
+        return round(usdt_amount / price, qty_prec)
     except:
         return round(usdt_amount / price, 1)
 
@@ -635,23 +642,42 @@ async def execute_trade(sig: dict, semaphore: asyncio.Semaphore) -> None:
             await asyncio.sleep(0.2)
             inc_trades_exec()  # count successful trade submissions
 
-            # 4. Stop-loss
+            # 4. Round SL/TP
+            price_prec, _ = get_precision_data(symbol)
+            sl_p = round(float(sl), int(price_prec))
+            tp_p = round(float(tp), int(price_prec))
+
+            # 5. Stop-loss
             sl_resp = binance_request("POST", "/fapi/v1/order", {
                 "symbol": symbol, "side": close_side,
-                "type": "STOP_MARKET", "stopPrice": sl, "closePosition": "true",
+                "type": "STOP_MARKET", "stopPrice": str(sl_p), "closePosition": "true",
             })
+            if "orderId" not in sl_resp:
+                bot_log.info("⚠️  Standard SL rejected (code %s), trying Algo fallback...", sl_resp.get('code'))
+                sl_resp = binance_request("POST", "/fapi/v1/algoOrder", {
+                    "algoType": "CONDITIONAL", "symbol": symbol, "side": close_side,
+                    "type": "STOP_MARKET", "triggerPrice": str(sl_p),
+                    "closePosition": "true", "workingType": "MARK_PRICE", "timeInForce": "GTC"
+                })
 
-            # 5. Take-profit
+            # 6. Take-profit
             tp_resp = binance_request("POST", "/fapi/v1/order", {
                 "symbol": symbol, "side": close_side,
-                "type": "TAKE_PROFIT_MARKET", "stopPrice": tp, "closePosition": "true",
+                "type": "TAKE_PROFIT_MARKET", "stopPrice": str(tp_p), "closePosition": "true",
             })
+            if "orderId" not in tp_resp:
+                bot_log.info("⚠️  Standard TP rejected (code %s), trying Algo fallback...", tp_resp.get('code'))
+                tp_resp = binance_request("POST", "/fapi/v1/algoOrder", {
+                    "algoType": "CONDITIONAL", "symbol": symbol, "side": close_side,
+                    "type": "TAKE_PROFIT_MARKET", "triggerPrice": str(tp_p),
+                    "closePosition": "true", "workingType": "MARK_PRICE", "timeInForce": "GTC"
+                })
 
-            sl_ok = "orderId" in sl_resp
-            tp_ok = "orderId" in tp_resp
+            sl_ok = ("orderId" in sl_resp or "algoId" in sl_resp)
+            tp_ok = ("orderId" in tp_resp or "algoId" in tp_resp)
 
-            sl_warn = "" if sl_ok else f"\n⚠️ <b>SL ORDER FAILED</b> — {_esc(sl_resp.get('msg','unknown'))}\n🔴 <b>SET MANUAL SL AT <code>${sl:.6f}</code> IMMEDIATELY</b>"
-            tp_warn = "" if tp_ok else f"\n⚠️ <b>TP ORDER FAILED</b> — {_esc(tp_resp.get('msg','unknown'))}"
+            sl_warn = "" if sl_ok else f"\n⚠️ <b>SL ORDER FAILED</b> — {sl_resp.get('msg','unknown')}\n🔴 <b>SET MANUAL SL AT <code>${sl_p:.6f}</code> IMMEDIATELY</b>"
+            tp_warn = "" if tp_ok else f"\n⚠️ <b>TP ORDER FAILED</b> — {tp_resp.get('msg','unknown')}"
 
             _active_targets[symbol] = {"sl": sl, "tp": tp}
             save_active_targets()
