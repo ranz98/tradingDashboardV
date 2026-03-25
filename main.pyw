@@ -35,7 +35,7 @@ except Exception:
 try:
     from cruzebot import (
         run_telegram_bot, run_stats_pusher,
-        load_total_signals, load_active_targets, load_managed_trades,
+        load_counters, load_active_targets, load_managed_trades,
         bot_log, push_log
     )
 except Exception:
@@ -219,7 +219,7 @@ class CruzeBotGUI(QMainWindow):
         self.log_view.setTextCursor(cursor)
 
     def start_bot(self):
-        load_total_signals()
+        load_counters()
         load_active_targets()
         load_managed_trades()
         threading.Thread(target=run_stats_pusher, name="StatsPusher", daemon=True).start()

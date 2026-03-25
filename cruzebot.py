@@ -145,15 +145,29 @@ def load_active_targets() -> None:
 def save_active_targets() -> None:
     kv_set_key("active_targets", _active_targets)
 
-def load_total_signals() -> None:
-    global _total_signals
-    # We fetch from 'cruzebot_stats' which is where the pusher saves its last snapshot
+def load_counters() -> None:
+    global _total_signals, _signals_rcvd, _valid_signals, _trades_exec, _counter_date
     data = kv_get_key("cruzebot_stats")
     if isinstance(data, dict):
-        prev = data.get("counters", {}).get("totalSignals", 0)
-        if isinstance(prev, int):
-            _total_signals = prev
-            push_log.info("📊 Loaded all-time signals from KV: %d", _total_signals)
+        c = data.get("counters", {})
+        ts = c.get("totalSignals", 0)
+        st = c.get("signalsToday", 0)
+        vs = c.get("validSignals", 0)
+        te = c.get("tradesExecuted", 0)
+        dt_str = c.get("date")
+
+        with _counter_lock:
+            if isinstance(ts, int): _total_signals = ts
+            if dt_str:
+                last_dt = datetime.fromisoformat(dt_str).date()
+                today = datetime.now(timezone.utc).date()
+                if last_dt == today:
+                    if isinstance(st, int): _signals_rcvd = st
+                    if isinstance(vs, int): _valid_signals = vs
+                    if isinstance(te, int): _trades_exec = te
+                    _counter_date = last_dt
+                    push_log.info("📊 Restored today's counters: %d signals, %d valid.", st, vs)
+            push_log.info("📊 Loaded all-time signals: %d", _total_signals)
 
 def _check_daily_reset() -> None:
     """Reset counters if the UTC date has rolled over."""
