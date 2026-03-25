@@ -345,45 +345,24 @@ def parse_signal(text: str) -> dict:
     t    = text.strip()
     errs = []
 
-    # ── 0. KEYWORD FILTERING ────────────────────────────────────────────────
-    good_kws = ["Entry Point", "Recommend", "total"]
-    bad_kws  = ["HIT", "LOSS", "passed"]
-
-    has_good = any(kw.lower() in t.lower() for kw in good_kws)
-    has_bad  = any(kw.lower() in t.lower() for kw in bad_kws)
-
-    if not has_good:
-        errs.append(f"❌ Missing signal keywords ({', '.join(good_kws)}) — ignoring")
-    if has_bad:
-        errs.append(f"❌ Contains ignore keywords (HIT, LOSS, passed) — skipping")
-
     # ── 1. SIDE ──────────────────────────────────────────────────────────────
     side = None
-    # Check for explicit LONG/BUY or SHORT/SELL indicators
-    if re.search(r"\b(buy|long)\b", t, re.I):
-        side = "LONG"
-    elif re.search(r"\b(sell|short)\b", t, re.I):
-        side = "SHORT"
-    # Also handle "Buy/Long" or "Sell/Short" combos
-    if re.search(r"buy\s*/\s*long|long\s*/\s*buy", t, re.I):
-        side = "LONG"
-    elif re.search(r"sell\s*/\s*short|short\s*/\s*sell", t, re.I):
-        side = "SHORT"
+    if re.search(r"\b(buy|long)\b", t, re.I): side = "LONG"
+    elif re.search(r"\b(sell|short)\b", t, re.I): side = "SHORT"
+    if re.search(r"buy\s*/\s*long|long\s*/\s*buy", t, re.I): side = "LONG"
+    elif re.search(r"sell\s*/\s*short|short\s*/\s*sell", t, re.I): side = "SHORT"
 
     if not side:
         errs.append("⚠️ Side (LONG/SHORT) not found")
 
     # ── 2. SYMBOL ────────────────────────────────────────────────────────────
     symbol = None
-    # Try "ABC/USDT" format first (e.g. RIVER/USDT, SQD/USDT)
     m = re.search(r"([A-Z0-9]{2,12})\s*/\s*USDT(?:\.P)?", t, re.I)
     if m:
         symbol = m.group(1).upper() + "USDT"
     else:
-        # Fallback: "ABCUSDT" or "ABC/USDT.P"
         m2 = re.search(r"([A-Z0-9]{2,12})USDT(?:\.P)?", t, re.I)
-        if m2:
-            symbol = m2.group(1).upper() + "USDT"
+        if m2: symbol = m2.group(1).upper() + "USDT"
 
     if not symbol:
         errs.append("❌ Symbol not found — cannot open trade")
@@ -391,65 +370,40 @@ def parse_signal(text: str) -> dict:
     # ── 3. ENTRY POINT ───────────────────────────────────────────────────────
     entry = None
     entry_low = entry_high = None
-    # Match range: "18.100- 18.300" or "0.07850 - 0.08400"
     m = re.search(r"[Ee]ntry\s*[Pp]oint[:\s-]*\s*([\d\.]+)\s*[-–]\s*([\d\.]+)", t)
     if m:
         entry_low  = float(m.group(1))
         entry_high = float(m.group(2))
-        entry = round((entry_low + entry_high) / 2, 8)  # use midpoint
+        entry = round((entry_low + entry_high) / 2, 8)
     else:
-        # Single entry value
         m2 = re.search(r"[Ee]ntry\s*[Pp]oint[:\s-]*\s*([\d\.]+)", t)
-        if m2:
-            entry = float(m2.group(1))
+        if m2: entry = float(m2.group(1))
 
     if not entry:
         errs.append("⚠️ Entry point not found — will use market price")
 
     # ── 4. LEVERAGE ──────────────────────────────────────────────────────────
-    leverage = LEVERAGE  # default from config
-    # Match "10x to 20x" or "5x to 20x" — use lower value
+    leverage = LEVERAGE
     m = re.search(r"[Ll]everage\s*[-:]*\s*(\d+)[xX]\s*to\s*(\d+)[xX]", t)
-    if m:
-        leverage = int(m.group(1))  # use lower (safer)
+    if m: leverage = int(m.group(1))
     else:
-        # Single leverage: "10x" or "Leverage: 10"
         m2 = re.search(r"[Ll]everage\s*[-:]*\s*(\d+)[xX]?", t)
-        if m2:
-            leverage = int(m2.group(1))
+        if m2: leverage = int(m2.group(1))
 
     # ── 5. TAKE PROFITS ──────────────────────────────────────────────────────
-    # Handles all formats:
-    #   "Tp 1 23.084"        (plain)
-    #   "Tp 1 👉 23.084"     (emoji arrow, common in signal channels)
-    #   "Tp 2 👉23.083"      (no space after emoji)
-    #   "Tp1 1.005"          (no space before number)
-    #   "Tp 1 : 23.084"      (colon separator)
-    #   "Tp 3 👉0.0828Tp"    (immediately followed by next TP — no newline)
-    #
-    # Strategy: after "Tp N", skip any non-digit characters (emojis, arrows,
-    # spaces, colons, dashes) then capture the first decimal number.
-    tp_matches = re.findall(
-        r"[Tt][Pp]\s*\d+\s*[^\d\n]{0,10}?([\d]+(?:\.[\d]+)?)", t
-    )
+    tp_matches = re.findall(r"[Tt][Pp]\s*\d+\s*[^\d\n]{0,10}?([\d]+(?:\.[\d]+)?)", t)
     tps = [float(x) for x in tp_matches if float(x) > 0]
-
     if not tps:
         errs.append("❌ Take Profit targets not found — cannot open trade")
-
-    # Always use TP5 (last TP) as the target — safest exit with most room
     tp_target = tps[-1] if tps else None
 
     # ── 6. STOP LOSS ─────────────────────────────────────────────────────────
     sl = None
-    # Match "Stop Loss - 21.789", "Stop Loss: 21.789", "SL: 21.789", "Stop Loss- 0.08500"
     m = re.search(r"[Ss]top\s*[Ll]oss\s*[-:–]*\s*([\d\.]+)", t)
-    if m:
-        sl = float(m.group(1))
+    if m: sl = float(m.group(1))
     else:
         m2 = re.search(r"\bSL\s*[-:]*\s*([\d\.]+)", t)
-        if m2:
-            sl = float(m2.group(1))
+        if m2: sl = float(m2.group(1))
 
     if not sl:
         errs.append("❌ Stop Loss not found — cannot open trade")
@@ -466,6 +420,10 @@ def parse_signal(text: str) -> dict:
             errs.append(f"⚠️ TP ({tp_target}) is below entry ({entry}) for LONG — check signal")
         if side == "SHORT" and tp_target and tp_target >= entry:
             errs.append(f"⚠️ TP ({tp_target}) is above entry ({entry}) for SHORT — check signal")
+
+    # ── 8. SIGNAL VERIFICATION (THRESHOLD) ──────────────────────────────────
+    if len(errs) >= 3:
+        errs.insert(0, f"❌ Message ignored: too many parsing issues ({len(errs)}) — likely not a signal")
 
     return {
         "symbol":     symbol,
