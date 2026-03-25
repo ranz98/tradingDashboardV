@@ -837,13 +837,21 @@ def collect_stats() -> dict:
         tgt = _active_targets.get(p["symbol"], {})
         final_sl = ls.get("sl") or tgt.get("sl")
         final_tp = ls.get("tp") or tgt.get("tp")
-        margin   = (abs(amt) * entry) / lev if lev else 0
+        # Margin Calculation: Try isolatedMargin first, then fallback to notional calculation
+        im = float(p.get("isolatedMargin", 0))
+        notional = float(p.get("notional", 0))
+        if im > 0:
+            m_val = im
+        else:
+            m_val = (abs(notional) / lev) if lev else 0
+            
+        push_log.debug(f"DEBUG MARGIN: {p['symbol']} AMT={amt} NOTIONAL={notional} LEV={lev} MARGIN={m_val}")
 
         positions.append({"symbol": p["symbol"], "side": "LONG" if amt>0 else "SHORT",
             "size": abs(amt), "entryPrice": round(entry,6), "markPrice": round(mark,6),
             "liqPrice": round(liq,6) if liq else None,
             "unrealizedPnl": round(upnl,4), "changePct": round(pct,3),
-            "leverage": lev, "margin": round(margin, 2),
+            "leverage": lev, "margin": round(m_val, 2),
             "sl": final_sl, "tp": final_tp})
 
     trades = [{"ts": i["time"],
