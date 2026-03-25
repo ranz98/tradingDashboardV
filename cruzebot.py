@@ -40,10 +40,11 @@ push_log = logging.getLogger("PUSHER")
 #  CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── Telegram listener (your signal source)
+# ── Telegram listener (your signal sources)
 TG_API_ID   = int(os.environ.get("TG_API_ID",  "15382179"))
 TG_API_HASH = os.environ.get("TG_API_HASH",    "90a79d047aec413ac623ae7384e264dc")
-TG_CHANNEL  = int(os.environ.get("TG_CHANNEL", "-1001947041400"))
+# Comma-separated IDs in ENV, or default list of two channels
+TG_CHANNELS = [int(i.strip()) for i in os.environ.get("TG_CHANNEL", "-1001947041400, -1001223635257").split(",")]
 TG_SESSION  = os.environ.get("TG_SESSION",     "trading_session")
 
 # ── Telegram notification bot (your alerts channel)
@@ -682,7 +683,7 @@ async def run_telegram_bot() -> None:
     semaphore = asyncio.Semaphore(2)
     client    = TelegramClient(TG_SESSION, TG_API_ID, TG_API_HASH)
 
-    @client.on(events.NewMessage(chats=TG_CHANNEL))
+    @client.on(events.NewMessage(chats=TG_CHANNELS))
     async def on_message(event):
         if not event.message.text:
             return
@@ -718,7 +719,7 @@ async def run_telegram_bot() -> None:
 
     bot_log.info("🚀  Connecting to Telegram …")
     await client.start()
-    bot_log.info("✅  Listening on channel %s", TG_CHANNEL)
+    bot_log.info("✅  Listening on %d channels: %s", len(TG_CHANNELS), TG_CHANNELS)
     await client.run_until_disconnected()
 
 
