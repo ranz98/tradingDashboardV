@@ -55,7 +55,7 @@ BINANCE_KEY    = os.environ.get("BINANCE_API_KEY",
     "Rm3MMRtjH49D1rqtRQaLkk1G0AaXR1RMgKFe0KOdS6iCxeG9Tt4n1pH8F1F3uQtp")
 BINANCE_SECRET = os.environ.get("BINANCE_API_SECRET",
     "9uu4HK9cAmPqnmppnprpfNt1EBBNymbZSKBsRHPoJyjXHWdB5gVe1oA08ip2FY4u")
-BINANCE_URL    = os.environ.get("BINANCE_BASE_URL", "https://testnet.binancefuture.com")
+BINANCE_URL    = os.environ.get("BINANCE_BASE_URL", "https://demo-fapi.binance.com")
 
 LEVERAGE    = int(os.environ.get("LEVERAGE",     "10"))
 USDT_AMOUNT = float(os.environ.get("USDT_AMOUNT", "120"))
@@ -517,11 +517,16 @@ def _sign(params: dict) -> str:
 def binance_request(method: str, endpoint: str, params: dict, weight: int = 5) -> dict:
     _check_weight(weight)
     params["timestamp"] = int(time.time() * 1000)
+    params["recvWindow"] = 10000 # Increased window for stability
     params["signature"] = _sign(params)
     headers = {"X-MBX-APIKEY": BINANCE_KEY}
     try:
         r = requests.request(method, BINANCE_URL + endpoint,
                              params=params, headers=headers, timeout=10)
+        
+        if r.status_code >= 400:
+            push_log.error("Binance API Error (%d): %s", r.status_code, r.text)
+
         sw = r.headers.get("X-MBX-USED-WEIGHT-1M")
         if sw:
             with _rl_lock:
@@ -535,10 +540,17 @@ def binance_request(method: str, endpoint: str, params: dict, weight: int = 5) -
 def binance_get(endpoint: str, params: dict = None, weight: int = 5):
     p = dict(params or {})
     p["timestamp"] = int(time.time() * 1000)
+    p["recvWindow"] = 10000
     p["signature"] = _sign(p)
     _check_weight(weight)
+    
     r = requests.get(BINANCE_URL + endpoint, params=p,
                      headers={"X-MBX-APIKEY": BINANCE_KEY}, timeout=15)
+    
+    if r.status_code >= 400:
+        push_log.error("Binance GET Error (%d): %s", r.status_code, r.text)
+        r.raise_for_status()
+
     sw = r.headers.get("X-MBX-USED-WEIGHT-1M")
     if sw:
         with _rl_lock:
