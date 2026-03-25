@@ -342,11 +342,16 @@ def parse_signal(text: str) -> dict:
         Leverage - 5x to 20x
         Tp 1 0.07700 ... Stop Loss- 0.08500
     """
-    t    = text.strip()
+    t = text.strip()
     errs = []
 
+    # Initialize all variables to avoid NameErrors
+    symbol = side = entry = tp_target = sl = None
+    entry_low = entry_high = None
+    leverage = LEVERAGE
+    tps = []
+
     # ── 1. SIDE ──────────────────────────────────────────────────────────────
-    side = None
     if re.search(r"\b(buy|long)\b", t, re.I): side = "LONG"
     elif re.search(r"\b(sell|short)\b", t, re.I): side = "SHORT"
     if re.search(r"buy\s*/\s*long|long\s*/\s*buy", t, re.I): side = "LONG"
@@ -356,7 +361,6 @@ def parse_signal(text: str) -> dict:
         errs.append("⚠️ Side (LONG/SHORT) not found")
 
     # ── 2. SYMBOL ────────────────────────────────────────────────────────────
-    symbol = None
     m = re.search(r"([A-Z0-9]{2,12})\s*/\s*USDT(?:\.P)?", t, re.I)
     if m:
         symbol = m.group(1).upper() + "USDT"
@@ -368,8 +372,6 @@ def parse_signal(text: str) -> dict:
         errs.append("❌ Symbol not found — cannot open trade")
 
     # ── 3. ENTRY POINT ───────────────────────────────────────────────────────
-    entry = None
-    entry_low = entry_high = None
     m = re.search(r"[Ee]ntry\s*[Pp]oint[:\s-]*\s*([\d\.]+)\s*[-–]\s*([\d\.]+)", t)
     if m:
         entry_low  = float(m.group(1))
@@ -383,7 +385,6 @@ def parse_signal(text: str) -> dict:
         errs.append("⚠️ Entry point not found — will use market price")
 
     # ── 4. LEVERAGE ──────────────────────────────────────────────────────────
-    leverage = LEVERAGE
     m = re.search(r"[Ll]everage\s*[-:]*\s*(\d+)[xX]\s*to\s*(\d+)[xX]", t)
     if m: leverage = int(m.group(1))
     else:
@@ -398,7 +399,6 @@ def parse_signal(text: str) -> dict:
     tp_target = tps[-1] if tps else None
 
     # ── 6. STOP LOSS ─────────────────────────────────────────────────────────
-    sl = None
     m = re.search(r"[Ss]top\s*[Ll]oss\s*[-:–]*\s*([\d\.]+)", t)
     if m: sl = float(m.group(1))
     else:
