@@ -939,32 +939,4 @@ def run_stats_pusher() -> None:
         time.sleep(max(0, PUSH_INTERVAL - (time.time() - start)))
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ENTRY POINT
-# ═══════════════════════════════════════════════════════════════════════════════
-
-if __name__ == "__main__":
-    print("""
-  ╔══════════════════════════════════════════╗
-  ║   🤖  CruzeBot  —  All-in-One            ║
-  ║   Thread 1 › Telegram listener + trades  ║
-  ║   Thread 2 › Vercel stats pusher         ║
-  ╚══════════════════════════════════════════╝
-""")
-    # Load persistent state
-    load_total_signals()
-    load_active_targets()
-    load_managed_trades()
-
-    # Thread 2: stats pusher — daemon so it dies when main exits
-    threading.Thread(target=run_stats_pusher, name="StatsPusher", daemon=True).start()
-
-    # Thread 1: Telegram bot on main thread (telethon needs a stable event loop)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(run_telegram_bot())
-    except KeyboardInterrupt:
-        print("\n👋  Shutting down …")
-    finally:
-        loop.close()
+# Bot logic is now triggered via main.py
